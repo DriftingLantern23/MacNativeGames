@@ -1063,12 +1063,8 @@ def step_shader_libs(tree, logs, *, version='v0'):
 
 
 def step_binary(tree, game, keys, env, logs, *, version="v0", title='0100f2c0115b6000'):
-    say('4/4 app: building the game binary and the launcher')
+    say('4/4 app: building the game binary (the launcher, app/launcher.m, is part of it)')
     run(['make', f'-j{os.cpu_count() or 4}', 'runtime' if version == 'v0' else f'runtime-{version}'], logs / 'runtime.log', cwd=tree, env=env)
-    # the launcher is per game and version (runtime/game_version.h: the data folder, the log name, the backup of saves)
-    defines = [] if version == 'v0' else [f'-DGAME_{version.upper()}=1'] if version.startswith('botw') else [f'-DTOTK_GAME_{version.upper()}=1']
-    run(['xcrun', 'clang', '-fobjc-arc', '-O2', '-Wall', '-Ithird_party/d2r_gfx/gfx/nvn', '-Iruntime', *defines, 'app/launcher.m', '-framework', 'AppKit',
-         '-o', 'build/app-launcher'], logs / 'launcher.log', cwd=tree, env=env)
     # used only while packaging (step_warm_metal); not part of the app
     run(['xcrun', 'clang', '-fobjc-arc', '-O2', '-Wall', '-Wextra', 'tools/warm_metal_cache.m', '-framework', 'Metal',
          '-framework', 'Foundation', '-o', 'build/warm-metal-cache'], logs / 'warm-metal-cache-build.log', cwd=tree, env=env)
@@ -1360,7 +1356,9 @@ def step_app(tree, out, logs, *, version="v0", game='totk'):
         place_variant_libs(tree, res, version)
     # after the checks above: signing it is slow
     place_data_bundle(data_bundle(tree, version, logs, bundle_id=bundle_id), tmp, res, version)
-    clone(tree / 'build/app-launcher', tmp / f'Contents/MacOS/{executable}')
+    # The app's executable is the game binary itself (its launcher part runs first, app/launcher.m): an app that execs another
+    # binary after it started is left out of the Cmd+Tab switcher (macOS 27). The copy in build/ stays for tools.
+    clone(res / 'build/totk-native', tmp / f'Contents/MacOS/{executable}')
     info = dict(CFBundleDevelopmentRegion='en', CFBundleExecutable=executable, CFBundleIdentifier=bundle_id, CFBundleName=app_name,
                 CFBundleDisplayName=app_name, CFBundlePackageType='APPL', CFBundleShortVersionString=expected['display_version'],
                 CFBundleVersion=str(expected['version'] + 1), LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True,
@@ -1376,13 +1374,14 @@ def step_app(tree, out, logs, *, version="v0", game='totk'):
     (tmp / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
     (tmp / 'Contents/PkgInfo').write_bytes(b'APPL????')
     sign_app(tmp, logs)  # A failed seal must not remove the previous working app.
-    old_binary = out/'Contents/Resources/totk/build/totk-native'
+    old_binaries = [b for b in (out/'Contents/Resources/totk/build/totk-native', out/f'Contents/MacOS/{executable}') if b.is_file()]
     notified = 0
-    while old_binary.is_file():
+    while old_binaries:
         # Preparing/signing a replacement is safe while playing; replacing the
         # resources of an active game is not. Wait without closing the player.
         processes = subprocess.run(['ps', '-axo', 'comm='], capture_output=True, text=True, check=True).stdout.splitlines()
-        if str(old_binary.resolve()) not in (p.strip() for p in processes):
+        running = {p.strip() for p in processes}
+        if not any(str(b.resolve()) in running for b in old_binaries):
             break
         if time.monotonic()-notified >= 60:
             say('4/4 app: replacement is ready; waiting for the running game to close before updating it')
@@ -1446,7 +1445,8 @@ def step_warm_metal(tree, out, logs):
         say('4/4 app: the startup shaders are compiled into the app (step_shader_libs), so Metal\'s cache needs no warming')
         return
     users = metal_cache_users()
-    if users or subprocess.run(['pgrep', '-q', 'totk-native']).returncode == 0:
+    if users or subprocess.run(['pgrep', '-q', 'totk-native']).returncode == 0 or \
+            subprocess.run(['pgrep', '-qf', '/Contents/MacOS/(TOTK|BotW)$']).returncode == 0:
         who = ', '.join(users) if users else 'a game'
         say(f"4/4 app: {who} has Metal's shader cache open, so the startup shaders are compiled on the first start instead "
             '(what this build compiled now would be lost when that program quits)')
