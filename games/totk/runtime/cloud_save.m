@@ -8,6 +8,10 @@
    - after the game commits a save (fs_host.c commit), the folder is copied to iCloud a few seconds later.
    When the two differ at start, the one saved last wins (sync.plist's time against the newest local file, which keeps its
    time when copied); the other is kept in <profile>/cloud-backups (the last 10). Nothing is merged inside a save.
+   A game that is still running when the other device uploads does not overwrite that save (the game writes its save
+   folder now and then even when nobody plays): it stops uploading and its next start takes the other device's save
+   (cloud-sync.plist "superseded"). The upload also runs when the game quits (Mac) or goes to the background (iPhone /
+   iPad), where the 3 s wait after a save might not come.
 
    Where <cloud> is: the app's iCloud container on iPhone / iPad (ios/tools/install_device.py --icloud signs it in, the
    container's Documents folder); on the Mac the folder that container appears as in iCloud Drive,
@@ -23,11 +27,15 @@
 #include <string.h>
 #include <unistd.h>
 #include "runtime.h"
+#if TARGET_OS_IPHONE
+#import <UIKit/UIKit.h>
+#endif
 
 
 static NSString *g_local, *g_state, *g_backups, *g_cloud;   // save folder, <profile>/cloud-sync.plist, backups, <cloud>/Saves
 static dispatch_queue_t g_queue;
-static int g_push_pending;
+static void watch_lifecycle(void);   // upload at quit / background (below)
+static int g_push_pending, g_superseded;   // an upload is waiting; another device uploaded since this one synced
 
 #define LOG(...) fprintf(stderr, "[cloud-save] " __VA_ARGS__)
 
@@ -101,6 +109,10 @@ static NSDictionary *read_plist(NSString *path) { NSDictionary *d = [NSDictionar
 static void write_state(NSNumber *gen, NSString *hash) {
     [@{@"gen": gen ?: @0, @"hash": hash ?: @""} writeToFile:g_state atomically:YES];
 }
+static void write_superseded(NSDictionary *state, NSNumber *cloudGen) {
+    NSMutableDictionary *d = [state ?: @{} mutableCopy]; d[@"superseded"] = cloudGen;
+    [d writeToFile:g_state atomically:YES];
+}
 
 /* Replace the contents of `dst` with those of `src`, through a sibling folder so a failure leaves `dst` as it was. */
 static BOOL replace_folder(NSString *src, NSString *dst) {
@@ -131,9 +143,15 @@ static void push(void) {
     NSString *cur = [g_cloud stringByAppendingPathComponent:@"current"], *hash = save_hash(g_local);
     NSDictionary *state = read_plist(g_state), *meta = read_plist([cur stringByAppendingPathComponent:@"sync.plist"]);
     if (!hash || !save_files(g_local).count) return;
+    if (g_superseded) return;
+    if (meta && state && ![meta[@"gen"] isEqual:state[@"gen"]]) {   // another device uploaded while this game ran
+        g_superseded = 1; write_superseded(state, meta[@"gen"]);
+        LOG("%s uploaded a newer save (generation %lld): this device's saves stay local, and its next start takes that one\n",
+            [meta[@"device"] UTF8String], [meta[@"gen"] longLongValue]);
+        return;
+    }
     if ([hash isEqualToString:state[@"hash"]] && [meta[@"gen"] isEqual:state[@"gen"]]) return;   // nothing new on either side
     long long gen = MAX([meta[@"gen"] longLongValue], [state[@"gen"] longLongValue]) + 1;
-    if (meta && ![meta[@"gen"] isEqual:state[@"gen"]] && ensure_downloaded(cur, 10)) backup(cur, @"icloud");   // another device saved meanwhile
     [NSFileManager.defaultManager createDirectoryAtPath:g_cloud withIntermediateDirectories:YES attributes:nil error:nil];
     __block BOOL ok = NO;
     NSError *cerr = nil;
@@ -156,6 +174,7 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
         g_state = [@(profile_dir) stringByAppendingPathComponent:@"cloud-sync.plist"];
         g_backups = [@(profile_dir) stringByAppendingPathComponent:@"cloud-backups"];
         g_queue = dispatch_queue_create("totk.cloud-save", DISPATCH_QUEUE_SERIAL);
+        watch_lifecycle();
         runtime_boot_status("iCloud", "Syncing saves");
         NSString *cur = [g_cloud stringByAppendingPathComponent:@"current"];
         NSDictionary *state = read_plist(g_state);
@@ -170,8 +189,10 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
             LOG("iCloud has no save yet\n"); if (localSaves) push(); return;
         }
         if ([meta[@"hash"] isEqualToString:local]) { write_state(meta[@"gen"], local); LOG("in sync (generation %lld)\n", [meta[@"gen"] longLongValue]); return; }
+        /* The last session saw the other device upload and stopped: that save wins, whatever this one wrote after it. */
+        BOOL superseded = state[@"superseded"] && [meta[@"gen"] longLongValue] >= [state[@"superseded"] longLongValue];
         double cloudTime = [meta[@"time"] doubleValue], localTime = localSaves ? newest_mtime(g_local) : 0;
-        if (localTime > cloudTime) { LOG("this device's save is newer than iCloud's\n"); push(); return; }
+        if (!superseded && localTime > cloudTime) { LOG("this device's save is newer than iCloud's\n"); push(); return; }
         if (!ensure_downloaded(cur, 60)) { LOG("the iCloud save did not download in time; this device's save is used\n"); return; }
         if (![save_hash(cur) isEqualToString:meta[@"hash"]]) { LOG("the iCloud save is incomplete (still syncing); this device's save is used\n"); return; }
         if (localSaves) backup(g_local, @"local");
@@ -179,9 +200,37 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
     }
 }
 
+/* An upload that is still waiting, now (the game quits or goes to the background). */
+static void flush(void) {
+    if (!g_queue || !__atomic_load_n(&g_push_pending, __ATOMIC_SEQ_CST)) return;
+    dispatch_sync(g_queue, ^{
+        if (!__atomic_exchange_n(&g_push_pending, 0, __ATOMIC_SEQ_CST)) return;
+        for (int i = 0; i < 50 && runtime_fs_save_busy(); i++) usleep(100000);   // a save being written: up to 5 s
+        @autoreleasepool { push(); }
+    });
+}
+static void flush_at_exit(void) { flush(); }
+static void watch_lifecycle(void) {
+    atexit(flush_at_exit);
+#if TARGET_OS_IPHONE
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
+            (void)n;
+            __block UIBackgroundTaskIdentifier task = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"iCloud save" expirationHandler:^{
+                [UIApplication.sharedApplication endBackgroundTask:task]; task = UIBackgroundTaskInvalid; }];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                flush();
+                dispatch_async(dispatch_get_main_queue(), ^{ if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task]; task = UIBackgroundTaskInvalid; });
+            });
+        }];
+    });
+#endif
+}
+
 /* fs_host.c commit: the game finished writing a save. Upload once it has been quiet for a moment. */
 static void push_when_quiet(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), g_queue, ^{
+        if (!__atomic_load_n(&g_push_pending, __ATOMIC_SEQ_CST)) return;   // flushed meanwhile
         if (runtime_fs_save_busy()) { push_when_quiet(); return; }
         __atomic_store_n(&g_push_pending, 0, __ATOMIC_SEQ_CST);
         @autoreleasepool { push(); }
