@@ -270,16 +270,22 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
     }
 }
 
-/* An upload that is still waiting, now (the game quits or goes to the background). */
-static void flush(void) {
-    if (!g_queue || !__atomic_load_n(&g_push_pending, __ATOMIC_SEQ_CST)) return;
+/* An upload that is still waiting, now (the game quits or goes to the background). `any`: also a save written since this
+   device's last upload with none waiting (push leaves it when nothing changed). */
+static void flush(int any) {
+    if (!g_queue) return;
+    if (!__atomic_load_n(&g_push_pending, __ATOMIC_SEQ_CST) && !(any && read_plist(g_state))) return;
     dispatch_sync(g_queue, ^{
-        if (!__atomic_exchange_n(&g_push_pending, 0, __ATOMIC_SEQ_CST)) return;
+        if (!__atomic_exchange_n(&g_push_pending, 0, __ATOMIC_SEQ_CST) && !any) return;
         for (int i = 0; i < 50 && runtime_fs_save_busy(); i++) usleep(100000);   // a save being written: up to 5 s
         @autoreleasepool { push(); }
     });
 }
-static void flush_at_exit(void) { flush(); }
+static void flush_at_exit(void) { flush(0); }
+/* The Mac game ends with _exit when its window closes (frontend.m), so flush_at_exit does not run then: a save made just
+   before quitting (its upload waits for 3 quiet seconds) went nowhere, and the next start, seeing iCloud at this device's
+   last generation, left it local too. */
+void runtime_cloud_save_quit(void) { flush(1); }
 static void watch_lifecycle(void) {
     atexit(flush_at_exit);
 #if TARGET_OS_IPHONE
@@ -289,7 +295,7 @@ static void watch_lifecycle(void) {
             __block UIBackgroundTaskIdentifier task = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"iCloud save" expirationHandler:^{
                 [UIApplication.sharedApplication endBackgroundTask:task]; task = UIBackgroundTaskInvalid; }];
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                flush();
+                flush(0);
                 dispatch_async(dispatch_get_main_queue(), ^{ if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task]; task = UIBackgroundTaskInvalid; });
             });
         }];

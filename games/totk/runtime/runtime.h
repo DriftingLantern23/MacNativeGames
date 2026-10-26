@@ -19,6 +19,7 @@ int runtime_app_launch(int argc, char **argv, char ***boot);   /* app/launcher.m
 void runtime_input_file_start(void);   /* input.c: the TOTK_INPUT_FILE command channel (at start, or after runtime_app_launch) */
 void runtime_cloud_save_start(const char *save_dir, const char *profile_dir);   /* cloud_save.m: saves in iCloud (fs_host.c) */
 void runtime_cloud_save_changed(void);
+void runtime_cloud_save_quit(void);   /* the Mac window closes (frontend.m): uploads what is not uploaded yet */
 /* The Mac's chosen sync folder (TOTK_CLOUD_SAVE_FOLDER) lives in this defaults suite, not the app's own: the app menu
    (frontend.m) and the launcher (app/launcher.m) may run in processes with different bundle identifiers. */
 #define RUNTIME_SAVE_SYNC_DEFAULTS "org.macnativegames.save-sync"

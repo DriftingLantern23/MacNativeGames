@@ -74,6 +74,7 @@ static int remove_tree(const char *path) {
 /* cloud_save.m (the game binaries); the probes that link this file alone keep their saves local. */
 __attribute__((weak)) void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) { (void)save_dir; (void)profile_dir; }
 __attribute__((weak)) void runtime_cloud_save_changed(void) {}
+__attribute__((weak)) void runtime_cloud_save_quit(void) {}
 static void init(void) {
     const char *dir = getenv("TOTK_PROFILE_DIR"); if (!dir) dir = "user-data";
     need(snprintf(profile, sizeof profile, "%s", dir) < (int)sizeof profile, "profile path");
