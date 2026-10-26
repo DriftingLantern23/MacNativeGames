@@ -338,10 +338,45 @@ static void note_occlusion(const char *when){int v=(window.occlusionState&NSWind
 static TOTKWindowDelegate *windowDelegate;
 int runtime_front_window_visible(void){return atomic_load(&windowVisible);}
 void runtime_front_request_close(void){dispatch_async(dispatch_get_main_queue(), ^{[window performClose:nil];});}
+/* Save sync (runtime/cloud_save.m): the folder the saves are copied to, e.g. an iCloud Drive folder shared with the
+   iPhone / iPad or another Apple ID. Stored in the app's defaults (TOTK_CLOUD_SAVE_FOLDER, read by app/launcher.m) and
+   used from the next start: the running game already chose its save. A sheet, so the game keeps drawing. */
+@interface TOTKCloudMenu:NSObject @property(nonatomic,strong) NSMenuItem *status; @end
+@implementation TOTKCloudMenu
+-(void)refresh{NSString *f=[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+ self.status.title=f.length?[NSString stringWithFormat:@(TOTK_UI("同步文件夹：%@","Sync folder: %@")),[f stringByAbbreviatingWithTildeInPath]]:@(TOTK_UI("未选择同步文件夹","No sync folder chosen"));}
+-(void)note:(NSString *)text{NSAlert *a=[NSAlert new];a.messageText=text;a.informativeText=@(TOTK_UI("下次启动游戏时生效。","Takes effect the next time the game starts."));[a beginSheetModalForWindow:window completionHandler:nil];}
+-(void)choose:(id)sender{(void)sender;
+ NSOpenPanel *p=[NSOpenPanel openPanel];p.canChooseFiles=NO;p.canChooseDirectories=YES;p.canCreateDirectories=YES;p.allowsMultipleSelection=NO;
+ p.message=@(TOTK_UI("选择每台设备都能看到的文件夹（例如 iCloud 云盘里共享的文件夹）。存档仍保存在本机，只把副本放进这里。","Choose a folder every device can see (e.g. a shared folder in iCloud Drive). Saves stay on this Mac; only a copy goes here."));
+ p.prompt=@(TOTK_UI("选择","Choose"));
+ NSString *cur=[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+ NSString *drive=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Mobile Documents/com~apple~CloudDocs"];
+ p.directoryURL=[NSURL fileURLWithPath:cur.length?cur:drive isDirectory:YES];
+ [p beginSheetModalForWindow:window completionHandler:^(NSModalResponse r){
+  if(r!=NSModalResponseOK||!p.URL)return;
+  [NSUserDefaults.standardUserDefaults setObject:p.URL.path forKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
+  dispatch_async(dispatch_get_main_queue(),^{[self note:[NSString stringWithFormat:@(TOTK_UI("存档会同步到 %@","Saves will sync through %@")),[p.URL.path stringByAbbreviatingWithTildeInPath]]];});
+ }];}
+-(void)stop:(id)sender{(void)sender;[NSUserDefaults.standardUserDefaults removeObjectForKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
+ [self note:@(TOTK_UI("不再使用同步文件夹","The sync folder is no longer used"))];}
+-(BOOL)validateMenuItem:(NSMenuItem *)item{return item.action!=@selector(stop:)||[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"].length>0;}
+@end
+static TOTKCloudMenu *cloudMenu;
+static void front_menu_cloud_add(NSMenu *appMenu){   // from front_install_menu
+ cloudMenu=[TOTKCloudMenu new];
+ NSMenu *sub=[[NSMenu alloc] initWithTitle:@(TOTK_UI("存档同步","Save Sync"))];
+ cloudMenu.status=[[NSMenuItem alloc] initWithTitle:@"" action:nil keyEquivalent:@""];cloudMenu.status.enabled=NO;[sub addItem:cloudMenu.status];
+ NSMenuItem *choose=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("选择同步文件夹…","Choose Sync Folder…")) action:@selector(choose:) keyEquivalent:@""];choose.target=cloudMenu;[sub addItem:choose];
+ NSMenuItem *stop=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("停止同步","Stop Syncing")) action:@selector(stop:) keyEquivalent:@""];stop.target=cloudMenu;[sub addItem:stop];
+ NSMenuItem *item=[[NSMenuItem alloc] initWithTitle:sub.title action:nil keyEquivalent:@""];item.submenu=sub;[appMenu addItem:item];
+ [appMenu addItem:[NSMenuItem separatorItem]];[cloudMenu refresh];
+}
 /* Use the window-close path, not terminate:, so Command-Q also waits for active saves. */
 static void front_install_menu(void){
  NSMenu *menu=[NSMenu new],*appMenu=[NSMenu new];
  NSMenuItem *appItem=[NSMenuItem new];appItem.submenu=appMenu;[menu addItem:appItem];
+ front_menu_cloud_add(appMenu);
  NSMenuItem *quit=[[NSMenuItem alloc] initWithTitle:@(TOTK_UI("退出 " GAME_NAME,"Quit " GAME_NAME)) action:@selector(performClose:) keyEquivalent:@"q"];
  quit.keyEquivalentModifierMask=NSEventModifierFlagCommand;quit.target=window;
  [appMenu addItem:quit];front_menubar_fps_add(menu);NSApp.mainMenu=menu;
