@@ -74,6 +74,32 @@ static void note(NSString *text) {
     [alert runModal];
 }
 
+/* Saves sync (runtime/cloud_save.m): a start with no sync folder offers to choose one, before the game reads its save, so
+   it syncs from this start. "Not now" asks again at the next start; "Don't ask again" (or Stop Syncing in the app menu,
+   runtime/frontend.m) never. Returns the folder chosen now, or nil. */
+static NSString *cloud_folder_offer(NSUserDefaults *sync) {
+    if ([sync boolForKey:@"TOTK_CLOUD_SAVE_ASKED"]) return nil;
+    [NSApplication sharedApplication]; [NSApp activateIgnoringOtherApps:YES];
+    NSAlert *alert = [NSAlert new];
+    alert.messageText = @(TOTK_UI("要和其他设备同步存档吗？", "Sync saves with your other devices?"));
+    alert.informativeText = @(TOTK_UI("选择一个每台设备都能看到的文件夹，例如 iCloud 云盘里的文件夹（也可以是和另一个 Apple ID 共享的文件夹）。存档仍保存在这台 Mac 上，只把副本放进这个文件夹，其他设备在那里接续。以后也可以在应用菜单 › 存档同步里更改。",
+                                      "Choose a folder every device can see, such as a folder in iCloud Drive (one shared with another Apple ID works too). Saves stay on this Mac; a copy goes to the folder, and your other devices carry on from there. You can change it later in the app menu › Save Sync."));
+    [alert addButtonWithTitle:@(TOTK_UI("选择文件夹…", "Choose Folder…"))];
+    [alert addButtonWithTitle:@(TOTK_UI("以后再说", "Not Now"))];
+    [alert addButtonWithTitle:@(TOTK_UI("不要再问", "Don't Ask Again"))];
+    NSModalResponse choice = [alert runModal];
+    if (choice == NSAlertThirdButtonReturn) [sync setBool:YES forKey:@"TOTK_CLOUD_SAVE_ASKED"];
+    if (choice != NSAlertFirstButtonReturn) return nil;
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = NO; panel.canChooseDirectories = YES; panel.canCreateDirectories = YES; panel.allowsMultipleSelection = NO;
+    panel.message = @(TOTK_UI("选择每台设备都能看到的文件夹（例如 iCloud 云盘里共享的文件夹）。", "Choose a folder every device can see (e.g. a shared folder in iCloud Drive)."));
+    panel.prompt = @(TOTK_UI("选择", "Choose"));
+    panel.directoryURL = [NSURL fileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Mobile Documents/com~apple~CloudDocs"] isDirectory:YES];
+    if ([panel runModal] != NSModalResponseOK || !panel.URL) return nil;   // cancelled: asked again at the next start
+    [sync setObject:panel.URL.path forKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+    return panel.URL.path;
+}
+
 /* Every TOTK_CONTRIB_STEP shaders and render pipelines the shared list does not have yet (totk_shader_contrib.h), before the game starts: ask
    the player to send the file in a GitHub issue. "Send" opens the issue form and shows the file in Finder to drag in.
    With gh signed in, "Submit automatically" takes the place of "Remind me next time" and sends this file at once.
@@ -217,8 +243,10 @@ int runtime_app_launch(int argc, char **argv, char ***boot) {
         /* Saves in iCloud (runtime/cloud_save.m): the iPhone / iPad app's iCloud container (ios/tools/install_device.py
            --icloud) appears in iCloud Drive as ~/Library/Mobile Documents/iCloud~<bundle id>~<team>; its Documents folder is
            the shared copy. Several such folders (several teams): the one that holds a save. A folder the player chose in the
-           app menu (runtime/frontend.m) comes before it; TOTK_CLOUD_SAVE_DIR wins over both; 0 = off. */
-        NSString *chosen = [[[NSUserDefaults alloc] initWithSuiteName:@RUNTIME_SAVE_SYNC_DEFAULTS] stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+           app menu (runtime/frontend.m) comes before it; TOTK_CLOUD_SAVE_DIR wins over both; 0 = off. With none of them,
+           cloud_folder_offer asks. */
+        NSUserDefaults *sync = [[NSUserDefaults alloc] initWithSuiteName:@RUNTIME_SAVE_SYNC_DEFAULTS];
+        NSString *chosen = [sync stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
         if (!getenv("TOTK_CLOUD_SAVE_DIR") && chosen.length) setenv("TOTK_CLOUD_SAVE_FOLDER", chosen.fileSystemRepresentation, 0);
         else if (!getenv("TOTK_CLOUD_SAVE_DIR")) {
             NSString *mobile = [home stringByAppendingPathComponent:@"Library/Mobile Documents"];
@@ -230,6 +258,7 @@ int runtime_app_launch(int argc, char **argv, char ***boot) {
                 if (!pick || [NSFileManager.defaultManager fileExistsAtPath:[docs stringByAppendingPathComponent:@"Saves"]]) pick = docs;
             }
             if (pick) setenv("TOTK_CLOUD_SAVE_DIR", pick.fileSystemRepresentation, 1);
+            else if ((chosen = cloud_folder_offer(sync))) setenv("TOTK_CLOUD_SAVE_FOLDER", chosen.fileSystemRepresentation, 1);
         }
         /* Player mods (runtime/romfs.c): <data>/mods/<version>/manifest.tsv, when present. */
         setenv("TOTK_ROMFS_MODS", [data stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR].fileSystemRepresentation, 0);

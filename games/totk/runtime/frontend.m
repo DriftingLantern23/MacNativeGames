@@ -334,7 +334,7 @@ static NSUserDefaults *syncDefaults(void){static NSUserDefaults *d;static dispat
   [syncDefaults() setObject:p.URL.path forKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
   dispatch_async(dispatch_get_main_queue(),^{[self note:[NSString stringWithFormat:@(TOTK_UI("存档会同步到 %@","Saves will sync through %@")),[p.URL.path stringByAbbreviatingWithTildeInPath]]];});
  }];}
--(void)stop:(id)sender{(void)sender;[syncDefaults() removeObjectForKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
+-(void)stop:(id)sender{(void)sender;[syncDefaults() removeObjectForKey:@"TOTK_CLOUD_SAVE_FOLDER"];[syncDefaults() setBool:YES forKey:@"TOTK_CLOUD_SAVE_ASKED"];[self refresh];   // and no offer at start (app/launcher.m)
  [self note:@(TOTK_UI("不再使用同步文件夹","The sync folder is no longer used"))];}
 -(BOOL)validateMenuItem:(NSMenuItem *)item{return item.action!=@selector(stop:)||[syncDefaults() stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"].length>0;}
 @end

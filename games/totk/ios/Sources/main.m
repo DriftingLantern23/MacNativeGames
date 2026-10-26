@@ -72,7 +72,8 @@ static NSString *seed_unpack(NSString *base, NSString *dest, void (^progress)(ui
 /* Save sync (runtime/cloud_save.m): a folder the player chose, e.g. an iCloud Drive folder shared with the Mac or with
    another Apple ID. Chosen in the system folder picker, opened at start when the Settings app's "Choose folder" switch is
    on or from the Home Screen icon's menu ("save-sync-folder", project.yml); remembered as a security-scoped bookmark and
-   opened for the app's life before the game starts. Settings › "Stop syncing" forgets it. The saves stay in Documents/save. */
+   opened for the app's life before the game starts. Settings › "Stop syncing" forgets it. The saves stay in Documents/save.
+   A start with no folder offers to choose one (offerCloudFolderThen); "Don't ask again" or "Stop syncing" ends that. */
 static NSString *const CloudBookmark = @"TOTK_CLOUD_SAVE_BOOKMARK", *const CloudName = @"TOTK_CLOUD_SAVE_FOLDER_NAME";
 static NSString *const CloudShortcut = @"save-sync-folder";
 static BOOL g_pick_cloud_folder;   // the app was opened from the Home Screen icon's "Save sync folder"
@@ -80,6 +81,7 @@ static void cloud_folder_forget_if_asked(void) {
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
     if (![d boolForKey:@"TOTK_CLOUD_SAVE_STOP"]) return;
     [d removeObjectForKey:CloudBookmark]; [d removeObjectForKey:CloudName]; [d setBool:NO forKey:@"TOTK_CLOUD_SAVE_STOP"];
+    [d setBool:YES forKey:@"TOTK_CLOUD_SAVE_ASKED"];   // and no offer at start
     fprintf(stderr, "[cloud-save] the sync folder is forgotten (Settings › Stop syncing)\n");
 }
 static void cloud_folder_apply(void) {
@@ -145,7 +147,29 @@ void runtime_settings_toggle(void) {}
         [self pickCloudFolderThen:^{ [weakSelf prepareAndStart]; }];
         return;
     }
+    NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
+    if (![d dataForKey:CloudBookmark] && ![d boolForKey:@"TOTK_CLOUD_SAVE_ASKED"] && !getenv("TOTK_CLOUD_SAVE_DIR") && !getenv("TOTK_CLOUD_SAVE_FOLDER")) {
+        [self offerCloudFolder];
+        return;
+    }
     [self prepareAndStart];
+}
+/* No sync folder yet: offer one before the game reads its save, so it syncs from this start. "Not now" asks again at the
+   next start (as does cancelling the picker); "Don't ask again" never (Settings › Choose folder still works). */
+- (void)offerCloudFolder {
+    BOOL zh = [NSLocale.preferredLanguages.firstObject hasPrefix:@"zh"];
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:(zh ? @"要和其他设备同步存档吗？" : @"Sync saves with your other devices?")
+        message:(zh ? @"选择一个每台设备都能看到的文件夹，例如 iCloud 云盘里的文件夹（也可以是和另一个 Apple ID 共享的文件夹）。存档仍保存在这台设备上，只把副本放进这个文件夹。以后也可以在“设置”App 里更改。"
+                    : @"Choose a folder every device can see, such as a folder in iCloud Drive (one shared with another Apple ID works too). Saves stay on this device; a copy goes to the folder. You can change it later in the Settings app.")
+        preferredStyle:UIAlertControllerStyleAlert];
+    __weak TOTKGameController *weakSelf = self;
+    [a addAction:[UIAlertAction actionWithTitle:(zh ? @"选择文件夹…" : @"Choose Folder…") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        (void)x; [weakSelf pickCloudFolderThen:^{ [weakSelf prepareAndStart]; }]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:(zh ? @"以后再说" : @"Not Now") style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) {
+        (void)x; [weakSelf prepareAndStart]; }]];
+    [a addAction:[UIAlertAction actionWithTitle:(zh ? @"不要再问" : @"Don't Ask Again") style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) {
+        (void)x; [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"TOTK_CLOUD_SAVE_ASKED"]; [weakSelf prepareAndStart]; }]];
+    [self presentViewController:a animated:YES completion:nil];
 }
 /* The folder picker (cloud_folder_apply above). Before the game starts, `then` continues the start; while it runs (the
    Home Screen menu of a running game), the new folder is used from the next start. */
