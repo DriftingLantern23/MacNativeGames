@@ -4,13 +4,6 @@
 "重新啟動遊戲後生效 · takes effect after relaunching the game" = "Takes effect after relaunching the game";
 "語言 · Language" = "Language";
 "自動 · 跟隨系統語言 · Follow system language" = "Follow system language";
-"畫面 · Display" = "Display";
-"開啟：遊戲的底座設定，輸出 1920×1080、內部 1600×900，需要較快的 iPad。關閉：手持 1280×720（內部 960×540）。重新啟動遊戲後生效 · on: the game's docked settings, 1920×1080 output, 1600×900 inside (for a fast iPad). Off: handheld 1280×720 (960×540 inside). Takes effect after relaunching the game" = "On: the game's docked settings, 1920×1080 output, 1600×900 inside (for a fast iPad). Off: handheld 1280×720 (960×540 inside). Takes effect after relaunching the game";
-"Full HD（底座模式）· Full HD (docked)" = "Full HD (docked)";
-"幀率 · Frame rate" = "Frame rate";
-"鎖 30 幀畫面更穩、手機更涼；遊戲中也可以點觸控按鍵中間的 60 / 30 切換 · 30 is steadier and keeps the phone cooler; the 60 / 30 button between − and + of the touch controls switches it while playing" = "30 is steadier and keeps the device cooler; the 60 / 30 button between − and + of the touch controls switches it while playing";
-"最高 60 · Up to 60" = "Up to 60";
-"鎖 30 · Held at 30" = "Held at 30";
 "存檔同步 · Save sync" = "Save sync";
 "存檔仍保存在本機，只把副本放進所選資料夾（例如 iCloud 雲碟裡與其他 Apple ID 共享的資料夾），Mac 選同一個資料夾即可接續遊玩。下次開啟遊戲時會出現資料夾選擇器；也可長按主畫面圖示選擇 · Saves stay on this device; a copy goes to the chosen folder (e.g. an iCloud Drive folder shared with another Apple ID). Choose the same folder on the Mac to carry on there. The folder picker appears the next time the game opens; or long-press the Home Screen icon" = "Saves stay on this device; a copy goes to the chosen folder (e.g. an iCloud Drive folder shared with another Apple ID). Choose the same folder on the Mac to carry on there. The folder picker appears the next time the game opens; or long-press the Home Screen icon";
 "資料夾 · Folder" = "Folder";
