@@ -47,7 +47,7 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         UIApplicationShortcutItems:   # the Home Screen icon's menu: choose the save sync folder (main.m, runtime/cloud_save.m)
           - UIApplicationShortcutItemType: save-sync-folder
-            UIApplicationShortcutItemTitle: 存檔同步資料夾 · Save sync folder
+            UIApplicationShortcutItemTitle: Save sync folder   # Sources/<language>.lproj/InfoPlist.strings
             UIApplicationShortcutItemIconSymbolName: icloud.and.arrow.up
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
