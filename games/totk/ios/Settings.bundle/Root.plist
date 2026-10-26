@@ -70,7 +70,7 @@
 			<key>Title</key>
 			<string>資料夾 · Folder</string>
 			<key>DefaultValue</key>
-			<string>未選擇 · None</string>
+			<string>—</string>
 		</dict>
 		<dict>
 			<key>Type</key>
