@@ -339,28 +339,29 @@ static TOTKWindowDelegate *windowDelegate;
 int runtime_front_window_visible(void){return atomic_load(&windowVisible);}
 void runtime_front_request_close(void){dispatch_async(dispatch_get_main_queue(), ^{[window performClose:nil];});}
 /* Save sync (runtime/cloud_save.m): the folder the saves are copied to, e.g. an iCloud Drive folder shared with the
-   iPhone / iPad or another Apple ID. Stored in the app's defaults (TOTK_CLOUD_SAVE_FOLDER, read by app/launcher.m) and
-   used from the next start: the running game already chose its save. A sheet, so the game keeps drawing. */
+   iPhone / iPad or another Apple ID. Stored in RUNTIME_SAVE_SYNC_DEFAULTS (TOTK_CLOUD_SAVE_FOLDER, read by app/launcher.m)
+   and used from the next start: the running game already chose its save. A sheet, so the game keeps drawing. */
+static NSUserDefaults *syncDefaults(void){static NSUserDefaults *d;static dispatch_once_t once;dispatch_once(&once,^{d=[[NSUserDefaults alloc] initWithSuiteName:@RUNTIME_SAVE_SYNC_DEFAULTS];});return d;}
 @interface TOTKCloudMenu:NSObject @property(nonatomic,strong) NSMenuItem *status; @end
 @implementation TOTKCloudMenu
--(void)refresh{NSString *f=[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+-(void)refresh{NSString *f=[syncDefaults() stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
  self.status.title=f.length?[NSString stringWithFormat:@(TOTK_UI("同步文件夹：%@","Sync folder: %@")),[f stringByAbbreviatingWithTildeInPath]]:@(TOTK_UI("未选择同步文件夹","No sync folder chosen"));}
 -(void)note:(NSString *)text{NSAlert *a=[NSAlert new];a.messageText=text;a.informativeText=@(TOTK_UI("下次启动游戏时生效。","Takes effect the next time the game starts."));[a beginSheetModalForWindow:window completionHandler:nil];}
 -(void)choose:(id)sender{(void)sender;
  NSOpenPanel *p=[NSOpenPanel openPanel];p.canChooseFiles=NO;p.canChooseDirectories=YES;p.canCreateDirectories=YES;p.allowsMultipleSelection=NO;
  p.message=@(TOTK_UI("选择每台设备都能看到的文件夹（例如 iCloud 云盘里共享的文件夹）。存档仍保存在本机，只把副本放进这里。","Choose a folder every device can see (e.g. a shared folder in iCloud Drive). Saves stay on this Mac; only a copy goes here."));
  p.prompt=@(TOTK_UI("选择","Choose"));
- NSString *cur=[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+ NSString *cur=[syncDefaults() stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
  NSString *drive=[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Mobile Documents/com~apple~CloudDocs"];
  p.directoryURL=[NSURL fileURLWithPath:cur.length?cur:drive isDirectory:YES];
  [p beginSheetModalForWindow:window completionHandler:^(NSModalResponse r){
   if(r!=NSModalResponseOK||!p.URL)return;
-  [NSUserDefaults.standardUserDefaults setObject:p.URL.path forKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
+  [syncDefaults() setObject:p.URL.path forKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
   dispatch_async(dispatch_get_main_queue(),^{[self note:[NSString stringWithFormat:@(TOTK_UI("存档会同步到 %@","Saves will sync through %@")),[p.URL.path stringByAbbreviatingWithTildeInPath]]];});
  }];}
--(void)stop:(id)sender{(void)sender;[NSUserDefaults.standardUserDefaults removeObjectForKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
+-(void)stop:(id)sender{(void)sender;[syncDefaults() removeObjectForKey:@"TOTK_CLOUD_SAVE_FOLDER"];[self refresh];
  [self note:@(TOTK_UI("不再使用同步文件夹","The sync folder is no longer used"))];}
--(BOOL)validateMenuItem:(NSMenuItem *)item{return item.action!=@selector(stop:)||[NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"].length>0;}
+-(BOOL)validateMenuItem:(NSMenuItem *)item{return item.action!=@selector(stop:)||[syncDefaults() stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"].length>0;}
 @end
 static TOTKCloudMenu *cloudMenu;
 static void front_menu_cloud_add(NSMenu *appMenu){   // from front_install_menu
