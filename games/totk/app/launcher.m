@@ -216,8 +216,11 @@ int runtime_app_launch(int argc, char **argv, char ***boot) {
         setenv("TOTK_NATIVE_DIR", [root stringByAppendingPathComponent:@"build"].fileSystemRepresentation, 1);
         /* Saves in iCloud (runtime/cloud_save.m): the iPhone / iPad app's iCloud container (ios/tools/install_device.py
            --icloud) appears in iCloud Drive as ~/Library/Mobile Documents/iCloud~<bundle id>~<team>; its Documents folder is
-           the shared copy. Several such folders (several teams): the one that holds a save. TOTK_CLOUD_SAVE_DIR wins; 0 = off. */
-        if (!getenv("TOTK_CLOUD_SAVE_DIR")) {
+           the shared copy. Several such folders (several teams): the one that holds a save. A folder the player chose in the
+           app menu (runtime/frontend.m) comes before it; TOTK_CLOUD_SAVE_DIR wins over both; 0 = off. */
+        NSString *chosen = [NSUserDefaults.standardUserDefaults stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+        if (!getenv("TOTK_CLOUD_SAVE_DIR") && chosen.length) setenv("TOTK_CLOUD_SAVE_FOLDER", chosen.fileSystemRepresentation, 0);
+        else if (!getenv("TOTK_CLOUD_SAVE_DIR")) {
             NSString *mobile = [home stringByAppendingPathComponent:@"Library/Mobile Documents"];
             NSString *prefix = [@"iCloud~" stringByAppendingString:[(NSBundle.mainBundle.bundleIdentifier ?: @"") stringByReplacingOccurrencesOfString:@"." withString:@"~"]];
             NSString *pick = nil;
