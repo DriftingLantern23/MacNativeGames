@@ -108,7 +108,7 @@
 		</dict>
 		<dict>
 			<key>DefaultValue</key>
-			<string>未選擇 · None</string>
+			<string>—</string>
 			<key>Key</key>
 			<string>TOTK_CLOUD_SAVE_FOLDER_NAME</string>
 			<key>Title</key>
