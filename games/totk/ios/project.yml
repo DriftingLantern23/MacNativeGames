@@ -48,7 +48,7 @@ targets:
         UIApplicationShortcutItems:   # the Home Screen icon's menu: choose the save sync folder (main.m, runtime/cloud_save.m)
           - UIApplicationShortcutItemType: save-sync-folder
             UIApplicationShortcutItemTitle: Save sync folder   # Sources/<language>.lproj/InfoPlist.strings
-            UIApplicationShortcutItemIconSymbolName: icloud.and.arrow.up
+            UIApplicationShortcutItemIconSymbolName: folder
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
           UISceneConfigurations:

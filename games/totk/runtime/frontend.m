@@ -289,7 +289,7 @@ void runtime_front_resize_aspect(double ratio){
 -(void)windowDidResignKey:(NSNotification *)n{(void)n;atomic_store(&focused,0);[(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];front_mouse_update();runtime_input_clear();runtime_oe_push_message(15);fprintf(stderr,"[totk] window lost focus\n");}
 /* The process ends with the window. Save writes go straight to the files (runtime/fs_host.c), so a close in the middle of a
    save waits (up to 15 s, the window already gone) until the game has written and committed it (runtime_fs_save_busy).
-   Then a save not in iCloud yet goes up (runtime_cloud_save_quit). */
+   Then a save not in the sync folder yet goes up (runtime_cloud_save_quit). */
 -(void)windowWillClose:(NSNotification *)n{(void)n;
  [(TOTKInputView *)window.contentView setCursorAutoHideEnabled:NO];
  if(mouseHeld){mouseHeld=NO;CGAssociateMouseAndMouseCursorPosition(true);[NSCursor unhide];}

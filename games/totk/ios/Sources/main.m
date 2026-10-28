@@ -148,10 +148,7 @@ void runtime_settings_toggle(void) {}
         return;
     }
     NSUserDefaults *d = NSUserDefaults.standardUserDefaults;
-    /* No offer either when the app syncs through its own iCloud container (install_device.py --icloud writes it into
-       NSUbiquitousContainers), as the Mac launcher does not offer when it finds that container's folder. */
-    BOOL container = [NSBundle.mainBundle objectForInfoDictionaryKey:@"NSUbiquitousContainers"] != nil;
-    if (!container && ![d dataForKey:CloudBookmark] && ![d boolForKey:@"TOTK_CLOUD_SAVE_ASKED"] && !getenv("TOTK_CLOUD_SAVE_DIR") && !getenv("TOTK_CLOUD_SAVE_FOLDER")) {
+    if (![d dataForKey:CloudBookmark] && ![d boolForKey:@"TOTK_CLOUD_SAVE_ASKED"] && !getenv("TOTK_CLOUD_SAVE_DIR") && !getenv("TOTK_CLOUD_SAVE_FOLDER")) {
         [self offerCloudFolder];
         return;
     }

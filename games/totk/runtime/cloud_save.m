@@ -1,32 +1,28 @@
-/* Saves in iCloud: the same save on the Mac and on iPhone / iPad.
+/* Save sync through a folder the player chooses: the same save on the Mac and on iPhone / iPad.
 
-   The game's save folder (<profile>/save/<uid>, runtime/fs_host.c) stays the working copy. A copy of it lives in iCloud
-   Drive as <cloud>/Saves/current, with current/sync.plist naming its generation, the device that wrote it, when and the
+   The game's save folder (<profile>/save/<uid>, runtime/fs_host.c) stays the working copy. A copy of it lives in the sync
+   folder as <sync>/Saves/current, with current/sync.plist naming its generation, the device that wrote it, when and the
    SHA-256 of its files:
-   - at start, before the game reads a save (fs_host.c init), the iCloud copy replaces the local folder when another
+   - at start, before the game reads a save (fs_host.c init), the folder's copy replaces the local folder when another
      device saved since this one last synced;
-   - after the game commits a save (fs_host.c commit), the folder is copied to iCloud a few seconds later.
+   - after the game commits a save (fs_host.c commit), the folder is copied to the sync folder a few seconds later.
    When the two differ at start, the one saved last wins (sync.plist's time against the newest local file, which keeps its
    time when copied); the other is kept in <profile>/cloud-backups (the last 10). Nothing is merged inside a save.
    A game that is still running when the other device uploads does not overwrite that save (the game writes its save
    folder now and then even when nobody plays): it stops uploading and its next start takes the other device's save
-   (cloud-sync.plist "superseded"). Generations decide: a device whose view of iCloud is out of date (iCloud Drive on
-   the Mac can take a while to download the other device's upload) never uploads over a newer generation, and an older
-   generation in iCloud than this device synced is replaced by this device's save. A device that never synced uploads only
-   into a folder it still finds empty at its first save in the game, not at start (iCloud may not have listed a folder new
-   to this device yet), so it cannot replace a save it has not seen. The upload also runs when the game quits (Mac) or goes to the background (iPhone /
-   iPad), where the 3 s wait after a save might not come.
+   (cloud-sync.plist "superseded"). Generations decide: a device whose view of the folder is out of date (a synced folder
+   such as iCloud Drive can take a while to download the other device's upload) never uploads over a newer generation, and
+   an older generation in the folder than this device synced is replaced by this device's save. A device that never synced
+   uploads only into a folder it still finds empty at its first save in the game, not at start (a synced folder may not
+   have listed a folder new to this device yet), so it cannot replace a save it has not seen. The upload also runs when
+   the game quits (Mac) or goes to the background (iPhone / iPad), where the 3 s wait after a save might not come.
 
-   Where <cloud> is:
-   - a folder the player chose, <folder>/<game name> (TOTK_CLOUD_SAVE_FOLDER): on the Mac from the app menu (runtime/
-     frontend.m, app/launcher.m), on iPhone / iPad from the Settings app or the Home Screen icon's menu (ios/Sources/main.m,
-     a security-scoped bookmark). Any folder each device can see works, among them an iCloud Drive folder shared between
-     two Apple IDs; no iCloud entitlement or paid team is needed. One folder holds both games side by side.
-   - otherwise the app's iCloud container on iPhone / iPad (ios/tools/install_device.py --icloud signs it in, the
-     container's Documents folder); on the Mac the folder that container appears as in iCloud Drive,
-     ~/Library/Mobile Documents/iCloud~org~macnativegames~totk~<team>/Documents, which app/launcher.m passes in
-     TOTK_CLOUD_SAVE_DIR (the Mac app needs no iCloud entitlement for a folder iCloud Drive syncs).
-   TOTK_CLOUD_SAVE_DIR wins over both; TOTK_CLOUD_SAVE_DIR=0 turns it off. */
+   <sync> is <folder>/<game name> (TOTK_CLOUD_SAVE_FOLDER), a folder the player chose: on the Mac from the app menu
+   (runtime/frontend.m) or the offer at a start that has none (app/launcher.m), on iPhone / iPad from that offer, the
+   Settings app or the Home Screen icon's menu (ios/Sources/main.m, a security-scoped bookmark). Any folder each device
+   can see works, among them an iCloud Drive folder (also one shared between two Apple IDs); the app needs no iCloud
+   container, entitlement or paid team. One folder holds both games side by side. TOTK_CLOUD_SAVE_DIR (the <sync> folder
+   itself) wins over it; TOTK_CLOUD_SAVE_DIR=0 turns sync off. With neither, nothing syncs. */
 #import <Foundation/Foundation.h>
 #include <CommonCrypto/CommonDigest.h>
 #include <TargetConditionals.h>
@@ -54,13 +50,7 @@ static NSString *cloud_root(void) {
     const char *e = getenv("TOTK_CLOUD_SAVE_DIR");
     if (e) return *e && strcmp(e, "0") ? @(e) : nil;
     const char *chosen = getenv("TOTK_CLOUD_SAVE_FOLDER");
-    if (chosen && *chosen) return [@(chosen) stringByAppendingPathComponent:@GAME_NAME];
-#if TARGET_OS_IPHONE
-    NSURL *u = [NSFileManager.defaultManager URLForUbiquityContainerIdentifier:nil];   // nil: no iCloud account or entitlement
-    return u ? [u URLByAppendingPathComponent:@"Documents"].path : nil;
-#else
-    return nil;
-#endif
+    return chosen && *chosen ? [@(chosen) stringByAppendingPathComponent:@GAME_NAME] : nil;
 }
 
 /* The files of a save folder, sorted, without Finder / iCloud bookkeeping and sync.plist. */
@@ -102,7 +92,7 @@ static double newest_mtime(NSString *dir) {
     return t;
 }
 
-/* iCloud keeps files as placeholders until asked (iPhone / iPad always; the Mac when "Optimise Mac Storage" evicted them,
+/* An iCloud Drive folder keeps files as placeholders until asked (iPhone / iPad always; the Mac when "Optimise Mac Storage" evicted them,
    or for a folder another Apple ID shares); ask for them and wait (at most `wait` s). A folder iCloud does not sync has
    no downloading status and passes at once. */
 static BOOL ensure_downloaded(NSString *dir, double wait) {
@@ -121,8 +111,8 @@ static BOOL ensure_downloaded(NSString *dir, double wait) {
     }
 }
 
-/* Read iCloud's copy while no other process writes it: NSFileCoordinator waits for iCloud Drive (or this game's own
-   upload) to finish a write in progress. NO when the read could not be coordinated. */
+/* Read the folder's copy while no other process writes it: NSFileCoordinator waits for iCloud Drive or the like (or
+   this game's own upload) to finish a write in progress. NO when the read could not be coordinated. */
 static BOOL read_coordinated(NSString *path, void (^read)(NSString *path)) {
     __block BOOL ran = NO;
     NSError *err = nil;
@@ -166,17 +156,17 @@ static void backup(NSString *src, NSString *what) {
     for (NSUInteger i = 0; i + 10 < all.count; i++) [fm removeItemAtPath:[g_backups stringByAppendingPathComponent:all[i]] error:nil];
 }
 
-/* Write the local save to iCloud as the next generation. */
+/* Write the local save to the sync folder as the next generation. */
 static void push(void) {
     NSString *cur = [g_cloud stringByAppendingPathComponent:@"current"], *hash = save_hash(g_local);
     NSDictionary *state = read_plist(g_state);
     __block NSDictionary *meta = read_plist([cur stringByAppendingPathComponent:@"sync.plist"]);
     if (!hash || !save_files(g_local).count) return;
     if (g_superseded) return;
-    if (!meta && state) { LOG("iCloud's save is not visible right now; this one waits for the next save\n"); return; }
+    if (!meta && state) { LOG("the folder's save is not visible right now; this one waits for the next save\n"); return; }
     if (!state) {
-        /* A device that never synced uploads only into a folder that is still empty when it looks again now: iCloud lists
-           a folder that is new to this device some time after the game opens it. A save that has appeared meanwhile is not
+        /* A device that never synced uploads only into a folder that is still empty when it looks again now: a synced folder
+           lists a folder that is new to this device some time after the game opens it. A save that has appeared meanwhile is not
            overwritten; the next start takes it, and keeps this device's save in cloud-backups. */
         ensure_downloaded(g_cloud, 10);
         read_coordinated(cur, ^(NSString *p) { meta = read_plist([p stringByAppendingPathComponent:@"sync.plist"]); });
@@ -205,14 +195,14 @@ static void push(void) {
     }];
     if (!ok) { LOG("upload failed%s%s\n", cerr ? ": " : "", cerr ? cerr.localizedDescription.UTF8String : ""); return; }
     write_state(@(gen), hash);
-    LOG("saved to iCloud (generation %lld)\n", gen);
+    LOG("saved to the sync folder (generation %lld)\n", gen);
 }
 
 /* fs_host.c init: before the game reads a save. */
 void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
     @autoreleasepool {
         NSString *root = cloud_root();
-        if (!root) { LOG("off (no iCloud folder)\n"); return; }
+        if (!root) { LOG("off (no sync folder)\n"); return; }
         /* A save folder that already lives in the sync folder (an older setup linked the profile into iCloud Drive) would
            be copied into itself: the game keeps it as it is. */
         NSString *localReal = @(save_dir).stringByResolvingSymlinksInPath, *rootReal = root.stringByResolvingSymlinksInPath;
@@ -226,7 +216,7 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
         g_backups = [@(profile_dir) stringByAppendingPathComponent:@"cloud-backups"];
         g_queue = dispatch_queue_create("totk.cloud-save", DISPATCH_QUEUE_SERIAL);
         watch_lifecycle();
-        runtime_boot_status("iCloud", "Syncing saves");
+        runtime_boot_status("Save sync", "Syncing saves");
         NSString *cur = [g_cloud stringByAppendingPathComponent:@"current"];
         NSDictionary *state = read_plist(g_state);
         ensure_downloaded(g_cloud, 30);
@@ -236,21 +226,21 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
         NSString *local = save_hash(g_local);
         BOOL localSaves = save_files(g_local).count > 0;
         if (!meta) {
-            /* A device that synced before but sees nothing has not learned of iCloud's files yet: it uploads on its
+            /* A device that synced before but sees nothing has not learned of the folder's files yet: it uploads on its
                next save, after the files have arrived, instead of now. */
-            if (state) { LOG("no iCloud save visible yet; this device's save is used\n"); return; }
-            /* Nor does a device that never synced upload now: iCloud may not have listed the folder yet. Its first save in
+            if (state) { LOG("no save visible in the folder yet; this device's save is used\n"); return; }
+            /* Nor does a device that never synced upload now: a synced folder may not be listed yet. Its first save in
                the game uploads, after push looks again (or the next start, if a save has arrived by then). */
             LOG("no save in the folder yet%s\n", localSaves ? "; this device's save goes up at its first save in the game, if the folder is still empty then" : ""); return;
         }
         if ([meta[@"hash"] isEqualToString:local]) { write_state(meta[@"gen"], local); LOG("in sync (generation %lld)\n", [meta[@"gen"] longLongValue]); return; }
         long long cloudGen = [meta[@"gen"] longLongValue], ownGen = [state[@"gen"] longLongValue];
         BOOL localChanged = localSaves && !(state && [state[@"hash"] isEqualToString:local]);
-        if (state && cloudGen == ownGen) { LOG("iCloud has this device's last upload (generation %lld)\n", cloudGen); return; }   // new progress goes up with the next save
+        if (state && cloudGen == ownGen) { LOG("the folder has this device's last upload (generation %lld)\n", cloudGen); return; }   // new progress goes up with the next save
         if (state && cloudGen < ownGen) {
-            /* An older generation than this device synced: another device wrote from an out-of-date view of iCloud. This
+            /* An older generation than this device synced: another device wrote from an out-of-date view of the folder. This
                device's save is the newer one. */
-            LOG("iCloud has generation %lld, older than this device's %lld: uploading this device's save\n", cloudGen, ownGen);
+            LOG("the folder has generation %lld, older than this device's %lld: uploading this device's save\n", cloudGen, ownGen);
             if (localSaves) push();
             return;
         }
@@ -259,11 +249,11 @@ void runtime_cloud_save_start(const char *save_dir, const char *profile_dir) {
         BOOL superseded = state[@"superseded"] && cloudGen >= [state[@"superseded"] longLongValue];
         double cloudTime = [meta[@"time"] doubleValue], localTime = localSaves ? newest_mtime(g_local) : 0;
         if (localChanged && !superseded && localTime > cloudTime) { LOG("both saved; this device's save is newer\n"); push(); return; }
-        if (!ensure_downloaded(cur, 60)) { LOG("the iCloud save did not download in time; this device's save is used\n"); return; }
+        if (!ensure_downloaded(cur, 60)) { LOG("the folder's save did not download in time; this device's save is used\n"); return; }
         /* Checked and copied in one coordinated read, so an upload arriving meanwhile cannot slip between the two. */
         read_coordinated(cur, ^(NSString *p) {
             NSDictionary *m = read_plist([p stringByAppendingPathComponent:@"sync.plist"]);
-            if (![m[@"gen"] isEqual:meta[@"gen"]] || ![save_hash(p) isEqualToString:m[@"hash"]]) { LOG("the iCloud save is incomplete (still syncing); this device's save is used\n"); return; }
+            if (![m[@"gen"] isEqual:meta[@"gen"]] || ![save_hash(p) isEqualToString:m[@"hash"]]) { LOG("the folder's save is incomplete (still syncing); this device's save is used\n"); return; }
             if (localSaves) backup(g_local, @"local");
             if (replace_folder(p, g_local)) { write_state(m[@"gen"], m[@"hash"]); LOG("loaded the save from %s (generation %lld)\n", [m[@"device"] UTF8String], [m[@"gen"] longLongValue]); }
         });
@@ -283,7 +273,7 @@ static void flush(int any) {
 }
 static void flush_at_exit(void) { flush(0); }
 /* The Mac game ends with _exit when its window closes (frontend.m), so flush_at_exit does not run then: a save made just
-   before quitting (its upload waits for 3 quiet seconds) went nowhere, and the next start, seeing iCloud at this device's
+   before quitting (its upload waits for 3 quiet seconds) went nowhere, and the next start, seeing the folder at this device's
    last generation, left it local too. */
 void runtime_cloud_save_quit(void) { flush(1); }
 static void watch_lifecycle(void) {
@@ -292,7 +282,7 @@ static void watch_lifecycle(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
             (void)n;
-            __block UIBackgroundTaskIdentifier task = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"iCloud save" expirationHandler:^{
+            __block UIBackgroundTaskIdentifier task = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"save sync" expirationHandler:^{
                 [UIApplication.sharedApplication endBackgroundTask:task]; task = UIBackgroundTaskInvalid; }];
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
                 flush(0);

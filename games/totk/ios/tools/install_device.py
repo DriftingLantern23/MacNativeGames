@@ -10,10 +10,6 @@ An IPA built with --ios-game-data documents carries no 17 GB game image: pass --
 romfs/romfs.bin and it is copied once into the app's Documents/GameData in 1 GiB parts (devicectl drops the connection on
 one file that size); a later install skips it while the device holds the same image (romfs.sha256 there).
 
---icloud (a paid team) keeps the saves in iCloud: the app gets the iCloud container iCloud.<build identifier>.<team>, which
-appears in iCloud Drive (also on the Mac, where the Mac app finds it), and the game syncs its save there (runtime/
-cloud_save.m). A free Personal Team cannot use iCloud.
-
 Xcode needs your Apple ID (Xcode > Settings > Accounts). The provisioning profile comes from a throwaway Xcode project
 built with the same bundle identifier and entitlements (-allowProvisioningUpdates registers the device and the App ID).
 """
@@ -22,11 +18,6 @@ from datetime import timezone
 from pathlib import Path
 
 ENTITLEMENT = 'com.apple.developer.kernel.increased-memory-limit'
-ICLOUD_KEYS = ('com.apple.developer.icloud-container-identifiers', 'com.apple.developer.ubiquity-container-identifiers',
-               'com.apple.developer.icloud-services')
-
-def icloud_entitlements(container):
-    return {ICLOUD_KEYS[0]: [container], ICLOUD_KEYS[1]: [container], ICLOUD_KEYS[2]: ['CloudDocuments']}
 CACHE = Path.home()/'Library/Caches/MacNativeGames/ios-signing'
 
 def run(cmd, **kw): return subprocess.run([str(x) for x in cmd], check=True, **kw)
@@ -54,15 +45,14 @@ def pick_device(name):
         sys.exit(f"choose the device with --device <name>:\n{listed}" if devs else 'no paired iPhone / iPad / Vision Pro found: pair it with this Mac and enable Developer Mode')
     return match[0]
 
-def profile(team, bundle_id, udid, platform='ios', container=None):
-    """Build an empty app with the game's bundle identifier and entitlements; Xcode makes the profile for it (with the
-    iCloud container when one is given: Xcode registers the App ID's iCloud capability and the container)."""
+def profile(team, bundle_id, udid, platform='ios'):
+    """Build an empty app with the game's bundle identifier and entitlements; Xcode makes the profile for it."""
     vision = platform == 'visionos'
     project_platform = 'visionOS' if vision else 'iOS'
     sdk = 'xros' if vision else 'iphoneos'
-    proj = CACHE/(bundle_id + ('.visionos' if vision else '') + ('.icloud' if container else '')); proj.mkdir(parents=True, exist_ok=True)
+    proj = CACHE/(bundle_id + ('.visionos' if vision else '')); proj.mkdir(parents=True, exist_ok=True)
     (proj/'main.m').write_text('int main(void) { return 0; }\n')
-    (proj/'TOTK.entitlements').write_bytes(plistlib.dumps({ENTITLEMENT: True, **(icloud_entitlements(container) if container else {})}))
+    (proj/'TOTK.entitlements').write_bytes(plistlib.dumps({ENTITLEMENT: True}))
     (proj/'project.yml').write_text(f'''name: TOTKSigning
 options: {{deploymentTarget: {{{project_platform}: "26.0"}}}}
 targets:
@@ -246,7 +236,6 @@ def main():
     ap.add_argument('--team', help='Apple team ID (default: the only team with an Apple Development certificate)')
     ap.add_argument('--bundle-id', help='default: the build\'s identifier (org.macnativegames.totk or .botw) + .<team>, so it is free to register on your team')
     ap.add_argument('--game-data', type=Path, help='romfs.bin (index.json beside it) for an IPA built with --ios-game-data documents')
-    ap.add_argument('--icloud', action='store_true', help='saves in iCloud, shared with the Mac app (needs a paid team)')
     a = ap.parse_args()
     team = a.team or (lambda t: t[0] if len(t) == 1 else sys.exit(
         f'choose the team with --team: {", ".join(t)}' if t else 'no Apple Development certificate: add your Apple ID in Xcode > Settings > Accounts'))(teams())
@@ -259,12 +248,9 @@ def main():
     platform = built_platform(a.ipa)
     if platform == 'visionos' and dev['hardwareProperties'].get('platform') != 'visionOS':
         sys.exit('this is a native Vision Pro app: choose a paired Vision Pro with --device')
-    container = f'iCloud.{built_bundle_id(a.ipa, team)}.{team}' if a.icloud else None   # the same for any bundle-id spelling
-    prov, signed = profile(team, bundle_id, udid, platform, container)
+    prov, signed = profile(team, bundle_id, udid, platform)
     info = plistlib.loads(out(['security','cms','-D','-i',prov]).encode())
     ents = info['Entitlements']
-    if container and container not in ents.get(ICLOUD_KEYS[0], []):
-        sys.exit(f'the provisioning profile has no iCloud container {container}: --icloud needs a paid team')
     if not ents.get(ENTITLEMENT):
         print(f'warning: your team cannot grant {ENTITLEMENT}; iOS may close the game when it runs out of memory')
     expires = info['ExpirationDate'].replace(tzinfo=timezone.utc).astimezone()  # plistlib returns naive UTC
@@ -282,17 +268,11 @@ def main():
         stamp.write_text(str(a.ipa.stat().st_mtime_ns))
     plist = app/'Info.plist'
     infoplist = plistlib.loads(plist.read_bytes()); infoplist['CFBundleIdentifier'] = bundle_id
-    infoplist.pop('NSUbiquitousContainers', None)
-    if container:   # shown in iCloud Drive as "TOTK", which is how the Mac app reaches it
-        infoplist['NSUbiquitousContainers'] = {container: {'NSUbiquitousContainerIsDocumentScopePublic': True,
-                                                           'NSUbiquitousContainerName': infoplist.get('CFBundleName', 'TOTK'),
-                                                           'NSUbiquitousContainerSupportedFolderLevels': 'Any'}}
     plist.write_bytes(plistlib.dumps(infoplist, fmt=plistlib.FMT_BINARY))
     shutil.copy2(prov, app/'embedded.mobileprovision')
     entfile = work/'entitlements.plist'
-    entfile.write_bytes(plistlib.dumps({**{k: ents[k] for k in ('application-identifier','com.apple.developer.team-identifier',
-                                                                   'get-task-allow', ENTITLEMENT) if k in ents},
-                                        **(icloud_entitlements(container) if container else {})}))
+    entfile.write_bytes(plistlib.dumps({k: ents[k] for k in ('application-identifier','com.apple.developer.team-identifier',
+                                                                'get-task-allow', ENTITLEMENT) if k in ents}))
     print('signing (a few minutes: every game file is hashed)')
     run(['codesign','--force','--sign',identity_of(signed),'--entitlements',entfile,'--generate-entitlement-der',app])
     print('installing over Wi-Fi' if dev['hardwareProperties'].get('platform') == 'visionOS' else 'installing (a few minutes over the cable)')

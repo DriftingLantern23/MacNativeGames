@@ -240,26 +240,12 @@ int runtime_app_launch(int argc, char **argv, char ***boot) {
         /* The folder the game binary's own files are in (shader-service, shader-seed, shader-libs, pso lists: totk_shader_rt.m
            root_dir, nvn_mtl.m exe_rel), which is no longer the folder of the running executable (Contents/MacOS). */
         setenv("TOTK_NATIVE_DIR", [root stringByAppendingPathComponent:@"build"].fileSystemRepresentation, 1);
-        /* Saves in iCloud (runtime/cloud_save.m): the iPhone / iPad app's iCloud container (ios/tools/install_device.py
-           --icloud) appears in iCloud Drive as ~/Library/Mobile Documents/iCloud~<bundle id>~<team>; its Documents folder is
-           the shared copy. Several such folders (several teams): the one that holds a save. A folder the player chose in the
-           app menu (runtime/frontend.m) comes before it; TOTK_CLOUD_SAVE_DIR wins over both; 0 = off. With none of them,
-           cloud_folder_offer asks. */
+        /* Save sync (runtime/cloud_save.m): the folder the player chose in the app menu (runtime/frontend.m) or in
+           cloud_folder_offer, which asks at a start that has none. TOTK_CLOUD_SAVE_DIR wins over it; 0 = off. */
         NSUserDefaults *sync = [[NSUserDefaults alloc] initWithSuiteName:@RUNTIME_SAVE_SYNC_DEFAULTS];
         NSString *chosen = [sync stringForKey:@"TOTK_CLOUD_SAVE_FOLDER"];
+        if (!getenv("TOTK_CLOUD_SAVE_DIR") && !getenv("TOTK_CLOUD_SAVE_FOLDER") && !chosen.length) chosen = cloud_folder_offer(sync);
         if (!getenv("TOTK_CLOUD_SAVE_DIR") && chosen.length) setenv("TOTK_CLOUD_SAVE_FOLDER", chosen.fileSystemRepresentation, 0);
-        else if (!getenv("TOTK_CLOUD_SAVE_DIR")) {
-            NSString *mobile = [home stringByAppendingPathComponent:@"Library/Mobile Documents"];
-            NSString *prefix = [@"iCloud~" stringByAppendingString:[(NSBundle.mainBundle.bundleIdentifier ?: @"") stringByReplacingOccurrencesOfString:@"." withString:@"~"]];
-            NSString *pick = nil;
-            for (NSString *name in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:mobile error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
-                if (![name hasPrefix:[prefix stringByAppendingString:@"~"]]) continue;
-                NSString *docs = [[mobile stringByAppendingPathComponent:name] stringByAppendingPathComponent:@"Documents"];
-                if (!pick || [NSFileManager.defaultManager fileExistsAtPath:[docs stringByAppendingPathComponent:@"Saves"]]) pick = docs;
-            }
-            if (pick) setenv("TOTK_CLOUD_SAVE_DIR", pick.fileSystemRepresentation, 1);
-            else if ((chosen = cloud_folder_offer(sync))) setenv("TOTK_CLOUD_SAVE_FOLDER", chosen.fileSystemRepresentation, 1);
-        }
         /* Player mods (runtime/romfs.c): <data>/mods/<version>/manifest.tsv, when present. */
         setenv("TOTK_ROMFS_MODS", [data stringByAppendingPathComponent:@"mods/" TOTK_GAME_DIR].fileSystemRepresentation, 0);
         /* The game's language (runtime/services.c): the app's first preferred language, which also follows a per-app
